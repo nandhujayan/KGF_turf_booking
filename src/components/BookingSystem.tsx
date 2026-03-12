@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { format, addDays, isSameDay } from 'date-fns';
-import { Calendar, Clock, CheckCircle2, CreditCard, Info, Lock } from 'lucide-react';
+import { Calendar, Clock, CheckCircle2, CreditCard, Info, Lock, ChevronLeft } from 'lucide-react';
 import type { Sport, TimeSlot } from '../types';
 import { SLOTS } from '../constants';
 
@@ -10,9 +10,10 @@ interface BookingSystemProps {
   user: any;
   onComplete: (bookingId: string) => void;
   onLoginRequest: () => void;
+  onBack?: () => void;
 }
 
-export default function BookingSystem({ sport, user, onComplete, onLoginRequest }: BookingSystemProps) {
+export default function BookingSystem({ sport, user, onComplete, onLoginRequest, onBack }: BookingSystemProps) {
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [selectedSlots, setSelectedSlots] = useState<string[]>([]);
   const [blockedSlots, setBlockedSlots] = useState<string[]>([]);
@@ -200,7 +201,7 @@ export default function BookingSystem({ sport, user, onComplete, onLoginRequest 
       const { lockId } = await lockRes.json();
       setCurrentLockId(lockId);
 
-      // 2. Proceed to Booking (Simulated Payment)
+      // 2. Build booking data and initiate Razorpay payment
       const bookingId = `KGF-${Math.random().toString(36).substr(2, 9).toUpperCase()}`;
       const bookingData = {
         id: bookingId,
@@ -210,21 +211,13 @@ export default function BookingSystem({ sport, user, onComplete, onLoginRequest 
         date: dateStr,
         slots: selectedSlots,
         totalPrice,
-        lockId // Pass lockId to server to confirm this lock
+        lockId
       };
 
-      const bookRes = await fetch('/api/bookings', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(bookingData)
-      });
-      
-      if (bookRes.ok) {
-        setCurrentLockId(null); // Lock converted to booking
-        onComplete(bookingId);
-      } else {
-        throw new Error("Booking failed");
-      }
+      // Initiate Razorpay payment - booking is created in /api/payment/verify after success
+      await initiateRazorpayPayment(bookingData, totalPrice);
+      // Note: isProcessing is kept true until Razorpay modal closes
+
     } catch (err) {
       console.error("Booking failed", err);
       setLockError("Booking failed. Please try again.");
@@ -233,17 +226,91 @@ export default function BookingSystem({ sport, user, onComplete, onLoginRequest 
     }
   };
 
+  const initiateRazorpayPayment = async (bookingData: any, totalPrice: number) => {
+    try {
+      // Create Razorpay order
+      const orderRes = await fetch('/api/payment/create-order', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ amount: totalPrice * 100, currency: 'INR' })
+      });
+      const orderData = await orderRes.json();
+      if (!orderData.id) throw new Error('Order creation failed');
+
+      const options = {
+        key: orderData.key,
+        amount: orderData.amount,
+        currency: orderData.currency,
+        name: 'KGF Arena',
+        description: `${sport} Booking - ${format(selectedDate, 'MMM d')}`,
+        order_id: orderData.id,
+        prefill: { name: user.name, email: user.email || '', contact: user.phone || '' },
+        theme: { color: '#00ff88' },
+        handler: async (response: any) => {
+          // Verify payment and create booking
+          const verifyRes = await fetch('/api/payment/verify', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ...response, bookingData })
+          });
+          const result = await verifyRes.json();
+          if (result.bookingId) {
+            setCurrentLockId(null);
+            onComplete(result.bookingId);
+          } else {
+            setLockError('Payment verification failed. Please try again.');
+          }
+        },
+        modal: {
+          ondismiss: () => {
+            setIsProcessing(false);
+            setLockError('Payment cancelled. Please try again.');
+          }
+        }
+      };
+
+      const Razorpay = (window as any).Razorpay;
+      if (!Razorpay) {
+        // Fallback: load the Razorpay script dynamically
+        const script = document.createElement('script');
+        script.src = 'https://checkout.razorpay.com/v1/checkout.js';
+        script.onload = () => {
+          const rzp = new (window as any).Razorpay(options);
+          rzp.open();
+        };
+        document.body.appendChild(script);
+      } else {
+        const rzp = new Razorpay(options);
+        rzp.open();
+      }
+    } catch (err) {
+      console.error('Payment initiation failed', err);
+      setLockError('Payment setup failed. Please try again.');
+      setIsProcessing(false);
+    }
+  };
+
   return (
-    <div className="max-w-7xl mx-auto px-4 pt-4 pb-12 min-h-[75vh]">
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-12 lg:gap-16 relative">
+    <div className="max-w-7xl mx-auto px-4 pt-2 pb-12 min-h-[75vh]">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 lg:gap-12 relative">
         {/* Mobile-only divider */}
         <div className="lg:hidden h-px w-full bg-white/10 absolute top-[400px] left-0 pointer-events-none" />
         
         {/* Date Selection */}
-        <div className="lg:col-span-1 space-y-8 lg:border-r lg:border-white/10 lg:pr-8 relative">
-          <div className="flex items-center gap-3 mb-6">
-            <Calendar className="text-primary w-5 h-5" />
-            <h2 className="text-xl font-display font-bold tracking-tight">SELECT DATE</h2>
+        <div className="lg:col-span-1 space-y-6 lg:border-r lg:border-white/10 lg:pr-8 relative">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-3">
+              <Calendar className="text-primary w-5 h-5" />
+              <h2 className="text-xl font-display font-bold tracking-tight">SELECT DATE</h2>
+            </div>
+            {onBack && (
+              <button
+                onClick={onBack}
+                className="hidden md:flex items-center gap-1 text-white/30 hover:text-primary transition-colors text-[10px] uppercase tracking-widest font-black"
+              >
+                <ChevronLeft className="w-4 h-4" /> Back
+              </button>
+            )}
           </div>
           <div className="grid grid-cols-2 gap-3">
             {dates.map((date) => (

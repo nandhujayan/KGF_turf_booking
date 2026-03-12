@@ -39,9 +39,16 @@ export default function UserProfile({ user: initialUser, onUpdateUser, onBookNow
   const [notifSettings, setNotifSettings] = useState({ bookingConfirm: true, reminders: true, promos: false });
   const [deleteConfirm, setDeleteConfirm] = useState('');
 
-  // Team Members state
-  const [teamMembers, setTeamMembers] = useState<{ [bookingId: string]: string[] }>({});
+  // Team Members state - persisted in localStorage
+  const TEAM_STORAGE_KEY = `kgf_team_${user.id}`;
+  const [teamMembers, setTeamMembers] = useState<{ [bookingId: string]: string[] }>(() => {
+    try { return JSON.parse(localStorage.getItem(TEAM_STORAGE_KEY) || '{}'); } catch { return {}; }
+  });
   const [newMember, setNewMember] = useState<{ [bookingId: string]: string }>({});
+
+  useEffect(() => {
+    localStorage.setItem(TEAM_STORAGE_KEY, JSON.stringify(teamMembers));
+  }, [teamMembers]);
 
   useEffect(() => {
     if (user) {
@@ -449,7 +456,7 @@ export default function UserProfile({ user: initialUser, onUpdateUser, onBookNow
           ) : (
             <div className="space-y-4">
               {/* Summary */}
-              <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-6">
+              <div className="grid grid-cols-2 gap-4 mb-6">
                 <div className="bg-primary/10 border border-primary/20 rounded-2xl p-5">
                   <div className="text-[10px] text-primary uppercase tracking-widest font-black mb-2">TOTAL SPENT</div>
                   <div className="text-3xl font-display font-black text-white">₹{bookings.reduce((s, b) => s + (b.total_price || 0), 0).toLocaleString()}</div>
@@ -458,23 +465,19 @@ export default function UserProfile({ user: initialUser, onUpdateUser, onBookNow
                   <div className="text-[10px] text-white/40 uppercase tracking-widest font-black mb-2">BOOKINGS</div>
                   <div className="text-3xl font-display font-black text-white">{bookings.length}</div>
                 </div>
-                <div className="bg-white/5 border border-white/10 rounded-2xl p-5">
-                  <div className="text-[10px] text-white/40 uppercase tracking-widest font-black mb-2">AVG PER BOOKING</div>
-                  <div className="text-3xl font-display font-black text-white">₹{bookings.length ? Math.round(bookings.reduce((s, b) => s + (b.total_price || 0), 0) / bookings.length) : 0}</div>
-                </div>
               </div>
               {/* Transactions */}
               <div className="bg-white/5 border border-white/10 rounded-2xl overflow-hidden">
-                <div className="px-6 py-4 border-b border-white/10 text-[10px] font-black tracking-[0.2em] text-white/40 uppercase grid grid-cols-4 gap-4">
-                  <span>BOOKING ID</span>
-                  <span>DATE</span>
+                <div className="px-4 py-3 border-b border-white/10 text-[10px] font-black tracking-[0.2em] text-white/40 uppercase grid grid-cols-5 gap-2">
+                  <span className="col-span-2">BOOKING ID</span>
+                  <span>DATE & TIME</span>
                   <span>SPORT</span>
                   <span className="text-right">AMOUNT</span>
                 </div>
                 {bookings.map((b) => (
-                  <div key={b.id} className="px-6 py-4 border-b border-white/5 grid grid-cols-4 gap-4 hover:bg-white/5 transition-colors">
-                    <span className="font-mono text-xs text-white/60 truncate">{b.id}</span>
-                    <span className="text-xs text-white/60">{format(new Date(b.date), 'MMM d, yyyy')}</span>
+                  <div key={b.id} className="px-4 py-3 border-b border-white/5 grid grid-cols-5 gap-2 hover:bg-white/5 transition-colors">
+                    <span className="col-span-2 font-mono text-xs text-white/60 truncate">{b.id}</span>
+                    <span className="text-xs text-white/60">{format(new Date(b.created_at || b.date), 'MMM d, h:mm a')}</span>
                     <span className="text-xs text-white/60 uppercase">{b.sport}</span>
                     <span className="text-right font-display font-bold text-primary">₹{b.total_price?.toLocaleString()}</span>
                   </div>

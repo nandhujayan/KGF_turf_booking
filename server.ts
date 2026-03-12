@@ -6,6 +6,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 import twilio from "twilio";
 import bcrypt from "bcryptjs";
+import crypto from "crypto";
 
 const { Pool } = pg;
 
@@ -138,6 +139,22 @@ async function initDb() {
         time TEXT,
         price INTEGER
       );
+
+      CREATE TABLE IF NOT EXISTS notifications (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER,
+        type TEXT,
+        title TEXT,
+        message TEXT,
+        is_read BOOLEAN DEFAULT FALSE,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+
+      -- Migration: add new columns to existing tables
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS google_id TEXT UNIQUE;
+      ALTER TABLE bookings ADD COLUMN IF NOT EXISTS players TEXT[] DEFAULT '{}';
+      ALTER TABLE bookings ADD COLUMN IF NOT EXISTS payment_id TEXT;
+      ALTER TABLE bookings ADD COLUMN IF NOT EXISTS razorpay_order_id TEXT;
     `);
     console.log("Database initialized");
   } catch (err) {
@@ -381,6 +398,12 @@ async function startServer() {
       const userResult = await client.query("SELECT phone FROM users WHERE id = $1", [userId]);
       const userPhone = userResult.rows[0]?.phone;
 
+      // Insert booking confirmation notification
+      await client.query(`
+        INSERT INTO notifications (user_id, type, title, message)
+        VALUES ($1, 'booking', $2, $3)
+      `, [userId, '\u2705 Booking Confirmed!', `Your ${sport} slot on ${date} has been confirmed.`]);
+
       const SLOTS_MAP: Record<string, string> = {
         '06-07': '06:00 AM', '07-08': '07:00 AM', '08-09': '08:00 AM',
         '09-10': '09:00 AM', '10-11': '10:00 AM', '16-17': '04:00 PM',
@@ -441,7 +464,161 @@ Time: ${formattedSlots}`;
     }
   });
 
+  // ===== RAZORPAY PAYMENT =====
+  app.post("/api/payment/create-order", async (req, res) => {
+    const RAZORPAY_KEY_ID = process.env.RAZORPAY_KEY_ID;
+    const RAZORPAY_KEY_SECRET = process.env.RAZORPAY_KEY_SECRET;
+    if (!RAZORPAY_KEY_ID || !RAZORPAY_KEY_SECRET) {
+      return res.status(500).json({ error: "Razorpay keys not configured" });
+    }
+    const { amount, currency = 'INR' } = req.body;
+    try {
+      const auth = Buffer.from(`${RAZORPAY_KEY_ID}:${RAZORPAY_KEY_SECRET}`).toString('base64');
+      const response = await fetch('https://api.razorpay.com/v1/orders', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Basic ${auth}` },
+        body: JSON.stringify({ amount, currency, receipt: `rcpt_${Date.now()}` })
+      });
+      const order = await response.json() as any;
+      res.json({ ...order, key: RAZORPAY_KEY_ID });
+    } catch (err) {
+      console.error("Razorpay order creation failed", err);
+      res.status(500).json({ error: "Payment order creation failed" });
+    }
+  });
+
+  app.post("/api/payment/verify", async (req, res) => {
+    const { razorpay_order_id, razorpay_payment_id, razorpay_signature, bookingData } = req.body;
+    const RAZORPAY_KEY_SECRET = process.env.RAZORPAY_KEY_SECRET;
+    if (!RAZORPAY_KEY_SECRET) return res.status(500).json({ error: "Razorpay not configured" });
+
+    // Verify signature
+    const expectedSign = crypto
+      .createHmac('sha256', RAZORPAY_KEY_SECRET)
+      .update(`${razorpay_order_id}|${razorpay_payment_id}`)
+      .digest('hex');
+
+    if (expectedSign !== razorpay_signature) {
+      return res.status(400).json({ error: "Invalid payment signature" });
+    }
+
+    // Create booking
+    const { id, userId, userName, sport, date, slots, totalPrice, lockId } = bookingData;
+    let client;
+    try {
+      client = await pool.connect();
+      await client.query('BEGIN');
+      if (lockId) await client.query("DELETE FROM bookings WHERE id = $1", [lockId]);
+      await client.query(`
+        INSERT INTO bookings (id, user_id, user_name, sport, date, slots, total_price, status, payment_id, razorpay_order_id)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, 'confirmed', $8, $9)
+      `, [id, userId, userName, sport, date, JSON.stringify(slots), totalPrice, razorpay_payment_id, razorpay_order_id]);
+
+      // Insert notification
+      await client.query(`
+        INSERT INTO notifications (user_id, type, title, message)
+        VALUES ($1, 'booking', '✅ Booking Confirmed!', $2)
+      `, [userId, `Your ${sport} slot on ${date} is confirmed. Payment ID: ${razorpay_payment_id}`]);
+
+      await client.query('COMMIT');
+      res.json({ success: true, bookingId: id });
+    } catch (err) {
+      if (client) try { await client.query('ROLLBACK'); } catch (e) {}
+      console.error("Booking after payment failed", err);
+      res.status(500).json({ error: "Booking creation failed after payment" });
+    } finally {
+      if (client) client.release();
+    }
+  });
+
+  // ===== GOOGLE AUTH =====
+  app.post("/api/auth/google", async (req, res) => {
+    const { credential } = req.body;
+    const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
+    if (!GOOGLE_CLIENT_ID) return res.status(500).json({ error: "Google auth not configured" });
+    try {
+      // Verify Google ID token
+      const googleRes = await fetch(`https://oauth2.googleapis.com/tokeninfo?id_token=${credential}`);
+      const payload = await googleRes.json() as any;
+      if (payload.aud !== GOOGLE_CLIENT_ID) return res.status(401).json({ error: "Invalid Google token" });
+
+      const { sub: googleId, email, name, picture } = payload;
+      // Upsert user
+      const existing = await pool.query("SELECT * FROM users WHERE google_id = $1 OR email = $2", [googleId, email]);
+      let user;
+      if (existing.rows.length > 0) {
+        user = existing.rows[0];
+        await pool.query("UPDATE users SET google_id = $1, photo = $2 WHERE id = $3", [googleId, picture, user.id]);
+        user.google_id = googleId;
+        user.photo = picture;
+      } else {
+        const result = await pool.query(
+          "INSERT INTO users (name, email, google_id, photo) VALUES ($1, $2, $3, $4) RETURNING *",
+          [name, email, googleId, picture]
+        );
+        user = result.rows[0];
+      }
+      const { password: _, ...safeUser } = user;
+      res.json({ success: true, user: safeUser });
+    } catch (err) {
+      console.error("Google auth failed", err);
+      res.status(500).json({ error: "Google authentication failed" });
+    }
+  });
+
+  // ===== BOOKING PLAYERS =====
+  app.get("/api/bookings/:id/players", async (req, res) => {
+    try {
+      const result = await pool.query("SELECT players FROM bookings WHERE id = $1", [req.params.id]);
+      res.json({ players: result.rows[0]?.players || [] });
+    } catch (err) {
+      res.status(500).json({ error: "Failed to fetch players" });
+    }
+  });
+
+  app.post("/api/bookings/:id/players", async (req, res) => {
+    const { players } = req.body; // string[]
+    try {
+      await pool.query("UPDATE bookings SET players = $1 WHERE id = $2", [players, req.params.id]);
+      res.json({ success: true, players });
+    } catch (err) {
+      res.status(500).json({ error: "Failed to update players" });
+    }
+  });
+
+  // ===== NOTIFICATIONS =====
+  app.get("/api/user/:id/notifications", async (req, res) => {
+    try {
+      const result = await pool.query(
+        "SELECT * FROM notifications WHERE user_id = $1 ORDER BY created_at DESC LIMIT 50",
+        [req.params.id]
+      );
+      res.json(result.rows);
+    } catch (err) {
+      res.status(500).json({ error: "Failed to fetch notifications" });
+    }
+  });
+
+  app.post("/api/notifications/:id/read", async (req, res) => {
+    try {
+      await pool.query("UPDATE notifications SET is_read = TRUE WHERE id = $1", [req.params.id]);
+      res.json({ success: true });
+    } catch (err) {
+      res.status(500).json({ error: "Failed to mark as read" });
+    }
+  });
+
+  app.post("/api/user/:id/notifications/read-all", async (req, res) => {
+    try {
+      await pool.query("UPDATE notifications SET is_read = TRUE WHERE user_id = $1", [req.params.id]);
+      res.json({ success: true });
+    } catch (err) {
+      res.status(500).json({ error: "Failed to mark all as read" });
+    }
+  });
+
   // --- Admin Routes ---
+
   app.post("/api/admin/login", (req, res) => {
     const { username, password } = req.body;
     const ADMIN_USER = process.env.ADMIN_USERNAME || "admin";
