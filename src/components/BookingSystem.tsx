@@ -17,9 +17,11 @@ export default function BookingSystem({ sport, user, onComplete, onLoginRequest 
   const [selectedSlots, setSelectedSlots] = useState<string[]>([]);
   const [blockedSlots, setBlockedSlots] = useState<string[]>([]);
   const [customSlots, setCustomSlots] = useState<TimeSlot[]>([]);
+  const [basePrice, setBasePrice] = useState<number>(1200);
   const [isProcessing, setIsProcessing] = useState(false);
   const [lockError, setLockError] = useState<string | null>(null);
   const [currentLockId, setCurrentLockId] = useState<string | null>(null);
+  const [isMaintenanceMode, setIsMaintenanceMode] = useState(false);
   
   const slotsContainerRef = useRef<HTMLDivElement>(null);
 
@@ -30,6 +32,7 @@ export default function BookingSystem({ sport, user, onComplete, onLoginRequest 
   useEffect(() => {
     fetchBlockedSlots();
     fetchCustomSlots();
+    fetchMaintenanceSettings();
     setSelectedSlots([]);
     setLockError(null);
     setCurrentLockId(null);
@@ -62,6 +65,21 @@ export default function BookingSystem({ sport, user, onComplete, onLoginRequest 
     };
   }, [currentLockId]);
 
+  const fetchMaintenanceSettings = async () => {
+    try {
+      const res = await fetch('/api/admin/settings');
+      if (res.ok) {
+        const data = await res.json();
+        setIsMaintenanceMode(data.maintenance_mode === 'true');
+        if (data.price_per_hour) {
+          setBasePrice(parseInt(data.price_per_hour));
+        }
+      }
+    } catch (err) {
+      console.error("Failed to fetch settings", err);
+    }
+  };
+
   const fetchBlockedSlots = async () => {
     try {
       const dateStr = format(selectedDate, 'yyyy-MM-dd');
@@ -77,11 +95,11 @@ export default function BookingSystem({ sport, user, onComplete, onLoginRequest 
 
   const fetchCustomSlots = async () => {
     try {
-      const res = await fetch(`/api/slots?sport=${sport}`);
+      const res = await fetch(`/api/slots?sport=all`); // all sports custom pricing
       const data = await res.json();
       const mapped = data.map((s: any) => ({
-        id: `custom-${s.id}`,
-        time: s.time,
+        id: s.time, // using time as the ID to match SLOTS logic
+        time: SLOTS.find(slot => slot.id === s.time)?.time || s.time,
         isBooked: false,
         price: s.price
       }));
@@ -91,7 +109,15 @@ export default function BookingSystem({ sport, user, onComplete, onLoginRequest 
     }
   };
 
-  const allSlots = [...SLOTS, ...customSlots];
+  const allSlots = useMemo(() => {
+    return SLOTS.map(slot => {
+      const customSlot = customSlots.find(cs => cs.id === slot.id);
+      return {
+        ...slot,
+        price: customSlot ? customSlot.price : basePrice
+      };
+    });
+  }, [customSlots, basePrice]);
 
   const toggleSlot = (id: string) => {
     setSelectedSlots(prev => 
@@ -208,10 +234,13 @@ export default function BookingSystem({ sport, user, onComplete, onLoginRequest 
   };
 
   return (
-    <div className="max-w-6xl mx-auto px-4 py-12">
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-12">
+    <div className="max-w-7xl mx-auto px-4 pt-4 pb-12 min-h-[75vh]">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-12 lg:gap-16 relative">
+        {/* Mobile-only divider */}
+        <div className="lg:hidden h-px w-full bg-white/10 absolute top-[400px] left-0 pointer-events-none" />
+        
         {/* Date Selection */}
-        <div className="lg:col-span-1 space-y-8">
+        <div className="lg:col-span-1 space-y-8 lg:border-r lg:border-white/10 lg:pr-8 relative">
           <div className="flex items-center gap-3 mb-6">
             <Calendar className="text-primary w-5 h-5" />
             <h2 className="text-xl font-display font-bold tracking-tight">SELECT DATE</h2>
@@ -238,23 +267,25 @@ export default function BookingSystem({ sport, user, onComplete, onLoginRequest 
               </motion.button>
             ))}
             
-            {/* Calendar Picker Button */}
-            <div className="relative col-span-2 mt-2">
+            {/* Calendar Picker Button - clickable anywhere on the row */}
+            <label className="relative col-span-2 mt-2 cursor-pointer block">
+              <div className="absolute inset-y-0 left-4 flex items-center pointer-events-none z-10">
+                <Calendar className="w-4 h-4 text-primary" />
+              </div>
               <input 
                 type="date" 
                 min={format(new Date(), 'yyyy-MM-dd')}
+                value={format(selectedDate, 'yyyy-MM-dd')}
+                onClick={(e) => (e.target as HTMLInputElement).showPicker?.()}
                 onChange={(e) => {
                   if (e.target.value) {
-                    setSelectedDate(new Date(e.target.value));
+                    const [year, month, day] = e.target.value.split('-').map(Number);
+                    setSelectedDate(new Date(year, month - 1, day));
                   }
                 }}
-                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
+                className="w-full bg-white/5 border border-white/10 hover:border-primary/50 rounded-xl py-4 pl-12 pr-4 text-white text-xs font-bold tracking-widest uppercase outline-none focus:border-primary transition-all [color-scheme:dark] cursor-pointer"
               />
-              <div className="w-full p-4 rounded-xl bg-white/5 border border-white/10 hover:border-primary/50 transition-all flex items-center justify-center gap-3 text-[10px] font-black tracking-widest uppercase text-white/60">
-                <Calendar className="w-4 h-4 text-primary" />
-                {dates.some(d => isSameDay(d, selectedDate)) ? 'SELECT OTHER DATE' : format(selectedDate, 'MMMM d, yyyy')}
-              </div>
-            </div>
+            </label>
           </div>
           
           <div className="p-6 rounded-2xl bg-white/5 border border-white/10">
@@ -270,7 +301,19 @@ export default function BookingSystem({ sport, user, onComplete, onLoginRequest 
         </div>
 
         {/* Slot Selection */}
-        <div className="lg:col-span-2 space-y-8" ref={slotsContainerRef}>
+        <div className="lg:col-span-2 space-y-8 relative" ref={slotsContainerRef}>
+          {isMaintenanceMode && (
+            <div className="absolute inset-0 z-50 bg-[#0a0f1c]/80 backdrop-blur-md rounded-2xl flex flex-col items-center justify-center p-8 text-center border border-red-500/20">
+              <div className="w-16 h-16 bg-red-500/10 text-red-500 rounded-full flex items-center justify-center mb-4 border border-red-500/20">
+                <Lock className="w-8 h-8" />
+              </div>
+              <h3 className="text-2xl font-display font-black text-white mb-2 tracking-tight">UNDER MAINTENANCE</h3>
+              <p className="text-white/60 max-w-sm leading-relaxed">
+                Due to maintenance, bookings are on hold. We will resume after some time. Thank you for your patience!
+              </p>
+            </div>
+          )}
+
           <div className="flex items-center gap-3 mb-6">
             <Clock className="text-primary w-5 h-5" />
             <h2 className="text-xl font-display font-bold tracking-tight">AVAILABLE SLOTS</h2>
@@ -278,7 +321,7 @@ export default function BookingSystem({ sport, user, onComplete, onLoginRequest 
           
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 pb-48 md:pb-0">
             {allSlots.map((slot) => {
-              const isBlocked = blockedSlots.includes(slot.id);
+              const isBlocked = isMaintenanceMode || blockedSlots.includes(slot.id);
               const isSelected = selectedSlots.includes(slot.id);
               
               return (
@@ -357,7 +400,16 @@ export default function BookingSystem({ sport, user, onComplete, onLoginRequest 
                       {discount > 0 && <div className="text-primary text-[10px] mt-1 font-bold uppercase">{discount}% DISCOUNT APPLIED!</div>}
 
                       {lockError && (
-                        <div className="text-red-400 text-xs font-bold mt-2">{lockError}</div>
+                        <div className="flex flex-col gap-2">
+                          <div className="text-red-400 text-xs font-bold mt-2">{lockError}</div>
+                          <button
+                            type="button"
+                            onClick={() => { setSelectedSlots([]); setLockError(null); }}
+                            className="text-[10px] font-black text-primary border border-primary/30 bg-primary/10 px-4 py-2 rounded-xl hover:bg-primary/20 transition-all uppercase tracking-widest"
+                          >
+                            ✕ CLEAR SELECTION
+                          </button>
+                        </div>
                       )}
                     </div>
                     

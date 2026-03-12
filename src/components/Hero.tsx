@@ -3,7 +3,7 @@ import { Trophy, Zap, ChevronRight } from 'lucide-react';
 
 export default function Hero({ onStartBooking }: { onStartBooking: () => void }) {
   return (
-    <section className="relative min-h-screen flex flex-col items-center justify-center px-4 overflow-hidden pt-32">
+    <section className="relative min-h-screen flex flex-col items-center justify-center px-4 overflow-hidden pt-20 text-center">
       {/* High Performance Particles - CSS Based */}
       <div className="absolute inset-0 pointer-events-none">
         {[...Array(20)].map((_, i) => (
@@ -44,6 +44,10 @@ export default function Hero({ onStartBooking }: { onStartBooking: () => void })
           <span>ELITE PERFORMANCE ARENA</span>
         </motion.div>
 
+        <h2 className="text-2xl md:text-3xl font-display font-medium text-white/50 mb-2 uppercase tracking-[0.2em] drop-shadow-md">
+          Kerala Game field
+        </h2>
+        
         <h1 className="text-7xl md:text-9xl font-display font-black tracking-tighter mb-6 leading-none">
           BOOK YOUR <br />
           <span className="text-primary italic relative">

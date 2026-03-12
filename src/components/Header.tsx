@@ -1,6 +1,6 @@
 import { motion } from 'motion/react';
 import { Trophy, User, Calendar, Menu, X } from 'lucide-react';
-import { useState } from 'react';
+import { useState, useRef, useEffect } from 'react';
 
 interface HeaderProps {
   user: any;
@@ -12,6 +12,22 @@ interface HeaderProps {
 export default function Header({ user, onLoginClick, onNavigate, onLogout }: HeaderProps) {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [showProfileMenu, setShowProfileMenu] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setShowProfileMenu(false);
+      }
+    }
+
+    if (showProfileMenu) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [showProfileMenu]);
 
   return (
     <header className="fixed top-0 left-0 w-full z-50 px-4 md:px-8 py-4">
@@ -46,14 +62,14 @@ export default function Header({ user, onLoginClick, onNavigate, onLogout }: Hea
         {/* User Actions */}
         <div className="flex items-center gap-4">
           {user ? (
-            <div className="relative">
+            <div className="relative" ref={dropdownRef}>
               <button 
                 onClick={() => setShowProfileMenu(!showProfileMenu)}
                 className="flex items-center gap-3 pl-4 pr-2 py-1.5 rounded-full bg-white/5 border border-white/10 hover:bg-white/10 transition-all"
               >
                 <span className="text-xs font-bold text-white hidden sm:block">{user.name}</span>
-                <div className="w-8 h-8 rounded-full bg-primary text-secondary flex items-center justify-center font-bold">
-                  {user.name[0]}
+                <div className="w-8 h-8 rounded-full bg-primary text-secondary flex items-center justify-center font-bold uppercase">
+                  {user.name?.[0] || 'U'}
                 </div>
               </button>
 

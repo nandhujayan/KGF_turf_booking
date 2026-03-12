@@ -33,8 +33,11 @@ export default function App() {
   }, [state]);
 
   const handleStartBooking = () => {
-    const selector = document.getElementById('sport-selector');
-    selector?.scrollIntoView({ behavior: 'smooth' });
+    setState('home');
+    setTimeout(() => {
+      const selector = document.getElementById('sport-selector');
+      selector?.scrollIntoView({ behavior: 'smooth' });
+    }, 100);
   };
 
   const handleSportSelect = (sport: Sport) => {
@@ -70,7 +73,7 @@ export default function App() {
             setState(page as AppState);
           }
         }}
-        onLogout={() => setUser(null)}
+        onLogout={() => { setUser(null); setState('home'); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
       />
 
       <LoginModal 
@@ -90,7 +93,7 @@ export default function App() {
             >
               <Hero onStartBooking={handleStartBooking} />
               
-              <div id="sport-selector">
+              <div id="sport-selector" className="scroll-mt-24">
                 <SportSelector selected={selectedSport} onSelect={handleSportSelect} />
               </div>
 
@@ -102,7 +105,7 @@ export default function App() {
                 <WeatherWidget />
               </div>
 
-              <div id="facilities">
+              <div id="facilities" className="scroll-mt-24">
                 <Facilities />
               </div>
               
@@ -110,7 +113,7 @@ export default function App() {
               
               <FAQ />
               
-              <div id="contact">
+              <div id="contact" className="scroll-mt-24">
                 <Contact />
               </div>
               
@@ -203,7 +206,7 @@ export default function App() {
               exit={{ opacity: 0, x: -20 }}
               className="pt-32 pb-20"
             >
-              <div className="max-w-6xl mx-auto px-4 mb-8">
+              <div className="max-w-7xl mx-auto px-4 mb-4">
                 <button 
                   onClick={() => setState('home')}
                   className="text-white/30 hover:text-primary transition-colors flex items-center gap-2 text-[10px] uppercase tracking-[0.2em] font-black"
@@ -246,7 +249,7 @@ export default function App() {
                   ← BACK
                 </button>
               </div>
-              <UserProfile user={user} onUpdateUser={setUser} />
+              <UserProfile user={user} onUpdateUser={setUser} onBookNow={handleStartBooking} />
             </motion.div>
           )}
 
