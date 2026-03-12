@@ -15,10 +15,11 @@ import Contact from './components/Contact';
 import FloatingContact from './components/FloatingContact';
 import FAQ from './components/FAQ';
 import WeatherWidget from './components/WeatherWidget';
+import NotificationsPage from './components/NotificationsPage';
 import type { Sport } from './types';
 import { Trophy, Phone, Instagram, Twitter, Mail, ShieldCheck, MapPin } from 'lucide-react';
 
-type AppState = 'home' | 'booking' | 'confirmation' | 'admin' | 'profile' | 'bookings';
+type AppState = 'home' | 'booking' | 'confirmation' | 'admin' | 'profile' | 'bookings' | 'notifications';
 
 export default function App() {
   const [state, setState] = useState<AppState>('home');
@@ -209,7 +210,7 @@ export default function App() {
               <div className="max-w-7xl mx-auto px-4 mb-4">
                 <button 
                   onClick={() => setState('home')}
-                  className="text-white/30 hover:text-primary transition-colors flex items-center gap-2 text-[10px] uppercase tracking-[0.2em] font-black"
+                  className="hidden md:flex text-white/30 hover:text-primary transition-colors items-center gap-2 text-[10px] uppercase tracking-[0.2em] font-black"
                 >
                   ← BACK TO HOME
                 </button>
@@ -219,6 +220,7 @@ export default function App() {
                 user={user}
                 onComplete={handleBookingComplete} 
                 onLoginRequest={() => setShowLogin(true)}
+                onBack={() => setState('home')}
               />
             </motion.div>
           )}
@@ -241,7 +243,7 @@ export default function App() {
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
             >
-               <div className="fixed top-24 left-8 z-50">
+              <div className="fixed top-24 left-8 z-50 hidden md:block">
                 <button 
                   onClick={() => setState('home')}
                   className="px-6 py-2 bg-white/5 border border-white/10 rounded-full text-[10px] font-black tracking-widest hover:bg-white/10 transition-all"
@@ -250,6 +252,25 @@ export default function App() {
                 </button>
               </div>
               <UserProfile user={user} onUpdateUser={setUser} onBookNow={handleStartBooking} />
+            </motion.div>
+          )}
+
+          {state === 'notifications' && user && (
+            <motion.div
+              key="notifications"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+            >
+              <div className="fixed top-24 left-8 z-50 hidden md:block">
+                <button 
+                  onClick={() => setState('home')}
+                  className="px-6 py-2 bg-white/5 border border-white/10 rounded-full text-[10px] font-black tracking-widest hover:bg-white/10 transition-all"
+                >
+                  ← BACK
+                </button>
+              </div>
+              <NotificationsPage user={user} />
             </motion.div>
           )}
 

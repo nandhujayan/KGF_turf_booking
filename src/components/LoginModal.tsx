@@ -1,6 +1,8 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { X, Phone, Mail, ArrowRight, Loader2, Eye, EyeOff } from 'lucide-react';
+
+const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || '';
 
 interface LoginModalProps {
   isOpen: boolean;
@@ -10,13 +12,14 @@ interface LoginModalProps {
 
 export default function LoginModal({ isOpen, onClose, onLogin }: LoginModalProps) {
   const [isLoginView, setIsLoginView] = useState(true);
-  const [identifier, setIdentifier] = useState(''); // Email or Phone for login
-  const [phone, setPhone] = useState(''); // Registration
-  const [email, setEmail] = useState(''); // Registration
-  const [name, setName] = useState(''); // Registration
+  const [identifier, setIdentifier] = useState('');
+  const [phone, setPhone] = useState('');
+  const [email, setEmail] = useState('');
+  const [name, setName] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [googleLoading, setGoogleLoading] = useState(false);
   const [error, setError] = useState('');
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -81,6 +84,64 @@ export default function LoginModal({ isOpen, onClose, onLogin }: LoginModalProps
     }
   };
 
+  const googleBtnRef = useRef<HTMLDivElement>(null);
+
+  // Load Google Sign-In script and render button
+  useEffect(() => {
+    if (!isOpen || !GOOGLE_CLIENT_ID) return;
+    const initGoogle = () => {
+      const g = (window as any).google;
+      if (!g) return;
+      g.accounts.id.initialize({
+        client_id: GOOGLE_CLIENT_ID,
+        callback: handleGoogleLogin,
+      });
+      if (googleBtnRef.current) {
+        g.accounts.id.renderButton(googleBtnRef.current, {
+          theme: 'filled_black',
+          size: 'large',
+          width: googleBtnRef.current.offsetWidth || 320,
+          text: 'continue_with',
+          shape: 'pill',
+        });
+      }
+    };
+
+    if ((window as any).google?.accounts) {
+      initGoogle();
+    } else {
+      const script = document.createElement('script');
+      script.src = 'https://accounts.google.com/gsi/client';
+      script.async = true;
+      script.onload = initGoogle;
+      document.body.appendChild(script);
+    }
+  }, [isOpen, isLoginView]);
+
+  const handleGoogleLogin = async (response: any) => {
+    setGoogleLoading(true);
+    setError('');
+    try {
+      const res = await fetch('/api/auth/google', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ credential: response.credential })
+      });
+      const data = await res.json();
+      if (res.ok && data.user) {
+        onLogin(data.user);
+        resetForm();
+        onClose();
+      } else {
+        setError(data.error || 'Google sign-in failed');
+      }
+    } catch {
+      setError('Network error during Google sign-in');
+    } finally {
+      setGoogleLoading(false);
+    }
+  };
+
   const resetForm = () => {
     setIdentifier('');
     setPhone('');
@@ -132,7 +193,26 @@ export default function LoginModal({ isOpen, onClose, onLogin }: LoginModalProps
               </div>
             )}
 
+            {/* Google Sign-In Button */}
+            {GOOGLE_CLIENT_ID && (
+              <div className="mb-4">
+                {googleLoading ? (
+                  <div className="flex items-center justify-center gap-2 py-3 text-white/40 text-sm">
+                    <Loader2 className="w-4 h-4 animate-spin" /> Signing in with Google...
+                  </div>
+                ) : (
+                  <div ref={googleBtnRef} className="w-full flex justify-center" />
+                )}
+                <div className="relative flex items-center gap-3 my-4">
+                  <div className="flex-1 h-px bg-white/10" />
+                  <span className="text-white/30 text-[10px] font-bold uppercase tracking-widest">or</span>
+                  <div className="flex-1 h-px bg-white/10" />
+                </div>
+              </div>
+            )}
+
             <form onSubmit={handleSubmit} className="space-y-4">
+
               {!isLoginView && (
                 <>
                   <div>
