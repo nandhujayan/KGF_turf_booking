@@ -13,11 +13,15 @@ const { Pool } = pg;
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+const isRemoteDb = (url?: string) =>
+  url?.includes('supabase.co') ||
+  url?.includes('neon.tech') ||
+  url?.includes('render.com') ||
+  url?.includes('dpg-'); // Render internal hostname
+
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: process.env.DATABASE_URL?.includes('supabase.co') || process.env.DATABASE_URL?.includes('neon.tech') 
-    ? { rejectUnauthorized: false } 
-    : false,
+  ssl: isRemoteDb(process.env.DATABASE_URL) ? { rejectUnauthorized: false } : false,
 });
 
 let twilioClient: twilio.Twilio | null = null;
