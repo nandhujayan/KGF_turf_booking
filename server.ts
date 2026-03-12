@@ -1,4 +1,5 @@
 import "dotenv/config";
+import dns from "dns";
 import express from "express";
 import { createServer as createViteServer } from "vite";
 import pg from "pg";
@@ -7,6 +8,9 @@ import { fileURLToPath } from "url";
 import twilio from "twilio";
 import bcrypt from "bcryptjs";
 import crypto from "crypto";
+
+// Force IPv4 DNS resolution — COMPULSORY for Render free tier to connect to DB
+dns.setDefaultResultOrder('ipv4first');
 
 const { Pool } = pg;
 
