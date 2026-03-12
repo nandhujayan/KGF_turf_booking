@@ -6,17 +6,17 @@ const FACILITIES = [
   { icon: Shield, name: "PREMIUM TURF", desc: "FIFA/ICC standard artificial grass" },
   { icon: Coffee, name: "CAFE & LOUNGE", desc: "Refreshments for players & fans" },
   { icon: Car, name: "VALET PARKING", desc: "Secure space for your vehicles" },
-  { icon: Waves, name: "SHOWER ROOMS", desc: "Clean & modern changing facilities" },
+  { icon: Waves, name: "WASHROOM", desc: "Clean & modern changing facilities" },
   { icon: Users, name: "FAN STANDS", desc: "Comfortable seating for spectators" },
 ];
 
 export default function Facilities() {
   return (
-    <section className="py-24 px-4 bg-black/20">
+    <section className="pt-4 pb-16 px-4 bg-black/20">
       <div className="max-w-6xl mx-auto">
-        <div className="text-center mb-16">
-          <h2 className="text-4xl md:text-5xl font-display font-black mb-4">ELITE <span className="text-primary">FACILITIES</span></h2>
-          <p className="text-white/40 uppercase tracking-[0.3em] text-sm">More than just a game</p>
+        <div className="text-center mb-8">
+          <h2 className="text-4xl md:text-5xl font-display font-black mb-4 text-center">ELITE <span className="text-primary">FACILITIES</span></h2>
+          <p className="text-white/40 uppercase tracking-[0.3em] text-sm text-center">More than just a game</p>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">

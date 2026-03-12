@@ -5,6 +5,7 @@ import pg from "pg";
 import path from "path";
 import { fileURLToPath } from "url";
 import twilio from "twilio";
+import bcrypt from "bcryptjs";
 
 const { Pool } = pg;
 
@@ -75,13 +76,16 @@ async function initDb() {
         id SERIAL PRIMARY KEY,
         name TEXT,
         phone TEXT UNIQUE,
-        email TEXT,
+        email TEXT UNIQUE,
+        password TEXT,
         photo TEXT,
         is_blocked INTEGER DEFAULT 0,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
 
       ALTER TABLE users ADD COLUMN IF NOT EXISTS photo TEXT;
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS password TEXT;
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS email TEXT UNIQUE;
 
       CREATE TABLE IF NOT EXISTS promo_codes (
         id SERIAL PRIMARY KEY,
@@ -111,8 +115,14 @@ async function initDb() {
         total_price INTEGER,
         status TEXT DEFAULT 'confirmed', -- confirmed, cancelled, locked
         locked_at TIMESTAMP,
+        rating INTEGER DEFAULT 0,
+        is_completed BOOLEAN DEFAULT FALSE,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
+      
+      -- Add columns if table already exists
+      ALTER TABLE bookings ADD COLUMN IF NOT EXISTS rating INTEGER DEFAULT 0;
+      ALTER TABLE bookings ADD COLUMN IF NOT EXISTS is_completed BOOLEAN DEFAULT FALSE;
 
       CREATE TABLE IF NOT EXISTS blocked_slots (
         id SERIAL PRIMARY KEY,
@@ -151,21 +161,68 @@ async function startServer() {
   });
 
   // --- Auth Routes ---
-  app.post("/api/login", async (req, res) => {
-    const { phone, email, name } = req.body;
+  app.post("/api/register", async (req, res) => {
+    const { name, phone, email, password } = req.body;
     try {
-      let result = await pool.query("SELECT * FROM users WHERE phone = $1", [phone]);
-      let user = result.rows[0];
-      if (!user) {
-        result = await pool.query(
-          "INSERT INTO users (name, phone, email) VALUES ($1, $2, $3) RETURNING *",
-          [name || 'User', phone, email]
-        );
-        user = result.rows[0];
+      if (!password) return res.status(400).json({ error: "Password is required" });
+      const hash = await bcrypt.hash(password, 10);
+      const result = await pool.query(
+        "INSERT INTO users (name, phone, email, password) VALUES ($1, $2, $3, $4) RETURNING *",
+        [name || 'User', phone, email, hash]
+      );
+      const user = result.rows[0];
+      delete user.password;
+      res.json(user);
+    } catch (err: any) {
+      if (err.code === '23505') {
+         return res.status(409).json({ error: "Phone or email already registered" });
       }
+      res.status(500).json({ error: "Registration failed" });
+    }
+  });
+
+  app.post("/api/login", async (req, res) => {
+    const { identifier, password } = req.body; // identifier can be phone or email
+    try {
+      const result = await pool.query("SELECT * FROM users WHERE phone = $1 OR email = $1", [identifier]);
+      let user = result.rows[0];
+      
+      if (!user) {
+        return res.status(401).json({ error: "User not registered" });
+      }
+
+      // Check password
+      if (!user.password) {
+         // Legacy users might not have a password, you should perhaps migrate them or deny login
+         return res.status(401).json({ error: "Please register or reset password" });
+      }
+
+      const match = await bcrypt.compare(password, user.password);
+      if (!match) {
+        return res.status(401).json({ error: "Invalid credentials" });
+      }
+
+      delete user.password;
       res.json(user);
     } catch (err) {
       res.status(500).json({ error: "Login failed" });
+    }
+  });
+
+  app.post("/api/user/:id/change-password", async (req, res) => {
+    const { oldPassword, newPassword } = req.body;
+    try {
+      const result = await pool.query("SELECT password FROM users WHERE id = $1", [req.params.id]);
+      const user = result.rows[0];
+      if (!user) return res.status(404).json({ error: "User not found" });
+      const match = await bcrypt.compare(oldPassword, user.password);
+      if (!match) return res.status(401).json({ error: "Current password is incorrect" });
+      if (!newPassword || newPassword.length < 6) return res.status(400).json({ error: "New password must be at least 6 characters" });
+      const hash = await bcrypt.hash(newPassword, 10);
+      await pool.query("UPDATE users SET password = $1 WHERE id = $2", [hash, req.params.id]);
+      res.json({ success: true });
+    } catch (err) {
+      res.status(500).json({ error: "Failed to change password" });
     }
   });
 
@@ -209,6 +266,16 @@ async function startServer() {
   });
 
   // --- Booking Routes ---
+  app.post("/api/bookings/:id/rate", async (req, res) => {
+    const { rating } = req.body;
+    try {
+      await pool.query("UPDATE bookings SET rating = $1 WHERE id = $2", [rating, req.params.id]);
+      res.json({ success: true });
+    } catch (err) {
+      res.status(500).json({ error: "Rating update failed" });
+    }
+  });
+
   app.get("/api/bookings", async (req, res) => {
     try {
       const result = await pool.query("SELECT * FROM bookings ORDER BY created_at DESC");
@@ -421,9 +488,27 @@ Time: ${formattedSlots}`;
       const revenueData = Object.entries(revenueByDate).map(([date, amount]) => ({ date, amount }));
       const sportData = Object.entries(bookingsBySport).map(([name, value]) => ({ name, value }));
 
+      const slotsCount = bookings.reduce((acc: any, b: any) => {
+        try {
+          const slots = JSON.parse(b.slots);
+          slots.forEach((s: string) => acc[s] = (acc[s] || 0) + 1);
+        } catch(e) {}
+        return acc;
+      }, {});
+      const popularSlots = Object.entries(slotsCount)
+        .map(([slot, count]) => ({ slot, count }))
+        .sort((a: any, b: any) => b.count - a.count)
+        .slice(0, 5);
+
+      const recentBookings = [...bookings]
+        .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+        .slice(0, 5);
+
       res.json({ 
         revenueData, 
         sportData, 
+        popularSlots,
+        recentBookings,
         totalBookings: bookings.length,
         totalUsers: usersCount,
         todayRevenue,
@@ -499,6 +584,11 @@ Time: ${formattedSlots}`;
       const result = await pool.query("SELECT * FROM bookings WHERE id = $1", [bookingId]);
       const booking = result.rows[0];
       if (booking) {
+        // Mark as completed upon successful scan/verify
+        if (!booking.is_completed) {
+          await pool.query("UPDATE bookings SET is_completed = TRUE WHERE id = $1", [bookingId]);
+          booking.is_completed = true;
+        }
         res.json({ success: true, booking });
       } else {
         res.status(404).json({ error: "Booking not found" });
@@ -538,9 +628,9 @@ Time: ${formattedSlots}`;
   });
 
   app.post("/api/admin/slots/delete", async (req, res) => {
-    const { id } = req.body;
+    const { time } = req.body;
     try {
-      await pool.query("DELETE FROM custom_slots WHERE id = $1", [id]);
+      await pool.query("DELETE FROM custom_slots WHERE time = $1", [time]);
       res.json({ success: true });
     } catch (err) {
       res.status(500).json({ error: "Failed to delete slot" });
@@ -649,25 +739,28 @@ Time: ${formattedSlots}`;
   });
 
   app.get("/api/slots", async (req, res) => {
-    const { sport } = req.query;
+    // We get all custom slots and filter on frontend for simplicity
     try {
-      const result = await pool.query("SELECT * FROM custom_slots WHERE sport = $1", [sport]);
+      const result = await pool.query("SELECT * FROM custom_slots");
       res.json(result.rows);
     } catch (err) {
       res.status(500).json({ error: "Failed to fetch slots" });
     }
   });
 
-  app.post("/api/admin/add-slot", async (req, res) => {
-    const { sport, time, price } = req.body;
+  app.post("/api/admin/slots/update", async (req, res) => {
+    const { id, time, price } = req.body;
     try {
-      await pool.query(
-        "INSERT INTO custom_slots (sport, time, price) VALUES ($1, $2, $3)",
-        [sport, time, price]
-      );
+      // Upsert based on time acting as the identifier
+      const exists = await pool.query("SELECT * FROM custom_slots WHERE time = $1", [time]);
+      if (exists.rows.length > 0) {
+        await pool.query("UPDATE custom_slots SET price = $1 WHERE time = $2", [price, time]);
+      } else {
+        await pool.query("INSERT INTO custom_slots (sport, time, price) VALUES ($1, $2, $3)", ['all', time, price]);
+      }
       res.json({ success: true });
     } catch (err) {
-      res.status(500).json({ error: "Failed to add slot" });
+      res.status(500).json({ error: "Failed to update slot" });
     }
   });
 

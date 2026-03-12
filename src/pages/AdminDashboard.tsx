@@ -6,9 +6,9 @@ import {
   ShieldAlert, Trash2, CheckCircle, XCircle, Search, 
   Filter, Tag, Clock, MapPin, Phone, Info, AlertTriangle,
   QrCode, RefreshCw, ChevronRight, LayoutDashboard, Download,
-  FileText, TrendingUp, Check
+  FileText, TrendingUp, Check, Menu, X
 } from 'lucide-react';
-import { Html5QrcodeScanner } from 'html5-qrcode';
+import QRScanner from '../components/QRScanner';
 import { SLOTS } from '../constants';
 
 const COLORS = ['#00ff88', '#0088FE', '#FFBB28', '#FF8042', '#8884d8'];
@@ -21,6 +21,7 @@ export default function AdminDashboard() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [activeTab, setActiveTab] = useState<Tab>('overview');
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   
   // Data states
   const [stats, setStats] = useState<any>(null);
@@ -28,6 +29,7 @@ export default function AdminDashboard() {
   const [users, setUsers] = useState<any[]>([]);
   const [settings, setSettings] = useState<any>({});
   const [promos, setPromos] = useState<any[]>([]);
+  const [customSlots, setCustomSlots] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   
   // Filter states
@@ -51,11 +53,18 @@ export default function AdminDashboard() {
         fetchBookings(),
         fetchUsers(),
         fetchSettings(),
-        fetchPromos()
+        fetchPromos(),
+        fetchCustomSlots()
       ]);
     } finally {
       setLoading(false);
     }
+  };
+
+  const fetchCustomSlots = async () => {
+    const res = await fetch('/api/slots');
+    const data = await res.json();
+    setCustomSlots(data);
   };
 
   const fetchStats = async () => {
@@ -115,6 +124,19 @@ export default function AdminDashboard() {
     const data = await res.json();
     setPromos(data);
   };
+
+  // State for dynamic pricing slot selector
+  const [selectedSlotForPrice, setSelectedSlotForPrice] = useState<string>('');
+  const [customPrice, setCustomPrice] = useState<string>('');
+  
+  // State for blocking slots
+  const [blockDate, setBlockDate] = useState<string>('');
+  const [blockSlotId, setBlockSlotId] = useState<string>('');
+  const [blockReason, setBlockReason] = useState<string>('');
+  
+  // State for cancelling slots
+  const [cancelDate, setCancelDate] = useState<string>('');
+  const [cancelSlotId, setCancelSlotId] = useState<string>('');
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -179,26 +201,12 @@ export default function AdminDashboard() {
   };
 
   const QRScannerView = () => {
-    const scannerRef = useRef<Html5QrcodeScanner | null>(null);
     const [scanResult, setScanResult] = useState<any>(null);
-
-    useEffect(() => {
-      scannerRef.current = new Html5QrcodeScanner(
-        "reader",
-        { fps: 10, qrbox: { width: 250, height: 250 } },
-        /* verbose= */ false
-      );
-
-      scannerRef.current.render(onScanSuccess, onScanError);
-
-      return () => {
-        if (scannerRef.current) {
-          scannerRef.current.clear().catch(console.error);
-        }
-      };
-    }, []);
+    const [isScanning, setIsScanning] = useState(false);
 
     async function onScanSuccess(decodedText: string) {
+      if (!decodedText) return;
+      setIsScanning(false);
       try {
         const res = await fetch('/api/admin/bookings/verify', { 
           method: 'POST', 
@@ -216,10 +224,6 @@ export default function AdminDashboard() {
       }
     }
 
-    function onScanError(err: any) {
-      // console.warn(err);
-    }
-
     return (
       <motion.div
         initial={{ opacity: 0 }}
@@ -231,15 +235,28 @@ export default function AdminDashboard() {
           <p className="text-white/40 text-sm font-bold tracking-widest uppercase">Scan user pass to verify entry</p>
         </div>
 
-        <div className="bg-white/5 border border-white/10 p-10 rounded-[3rem] space-y-8">
-          <div id="reader" className="overflow-hidden rounded-2xl border border-white/10 bg-black/20" />
+        <div className="bg-white/5 border border-white/10 p-10 rounded-[3rem] space-y-8 flex flex-col items-center">
           
-          <div className="relative">
+          <button 
+            onClick={() => setIsScanning(true)}
+            className="w-full max-w-sm py-6 bg-primary text-secondary rounded-2xl font-black text-lg hover:scale-105 transition-all flex items-center justify-center gap-3 shadow-[0_0_30px_rgba(0,255,136,0.3)]"
+          >
+            <QrCode className="w-6 h-6" /> OPEN CAMERA SCANNER
+          </button>
+
+          {isScanning && (
+            <QRScanner 
+              onScan={onScanSuccess} 
+              onClose={() => setIsScanning(false)}
+            />
+          )}
+          
+          <div className="relative w-full">
             <QrCode className="absolute left-6 top-1/2 -translate-y-1/2 w-6 h-6 text-primary" />
             <input 
               type="text" 
               placeholder="OR ENTER BOOKING ID..."
-              className="w-full bg-black/40 border border-white/10 rounded-[2rem] py-8 pl-16 pr-8 text-xl font-display font-black tracking-widest text-white outline-none focus:border-primary transition-all"
+              className="w-full bg-black/40 border border-white/10 rounded-[2rem] py-8 pl-16 pr-8 text-xl font-display font-black tracking-widest text-white outline-none focus:border-primary transition-all text-center"
               onKeyDown={async (e) => {
                 if (e.key === 'Enter') {
                   onScanSuccess((e.target as HTMLInputElement).value);
@@ -253,7 +270,7 @@ export default function AdminDashboard() {
               <motion.div 
                 initial={{ opacity: 0, scale: 0.9 }}
                 animate={{ opacity: 1, scale: 1 }}
-                className="p-8 bg-primary/10 rounded-[2rem] border border-primary/20 space-y-4"
+                className="w-full p-8 bg-primary/10 rounded-[2rem] border border-primary/20 space-y-4"
               >
                 <div className="flex items-center justify-between">
                   <h4 className="text-xl font-display font-black text-primary uppercase">VERIFIED ✅</h4>
@@ -351,17 +368,33 @@ export default function AdminDashboard() {
   }
 
   return (
-    <div className="min-h-screen bg-[#0a0f1c] flex flex-col md:flex-row">
+    <div className="min-h-screen bg-[#0a0f1c] flex flex-col md:flex-row relative">
+      {/* Mobile Header for Sidebar Toggle */}
+      <div className="md:hidden flex items-center justify-between p-4 bg-black/40 border-b border-white/5 sticky top-0 z-40">
+        <div className="flex items-center gap-2">
+          <div className="w-8 h-8 bg-primary rounded-lg flex items-center justify-center">
+            <Settings className="text-secondary w-5 h-5" />
+          </div>
+          <span className="text-lg font-display font-black tracking-tighter text-white">ADMIN<span className="text-primary italic">HUB</span></span>
+        </div>
+        <button 
+          onClick={() => setIsSidebarOpen(!isSidebarOpen)}
+          className="p-2 text-white/60 hover:text-white bg-white/5 rounded-xl"
+        >
+          {isSidebarOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
+        </button>
+      </div>
+
       {/* Sidebar */}
-      <aside className="w-full md:w-64 bg-black/40 border-r border-white/5 p-6 flex flex-col gap-8 pt-24">
-        <div className="flex items-center gap-3 px-2">
+      <aside className={`fixed md:sticky top-0 left-0 h-screen w-64 bg-black/90 md:bg-black/40 border-r border-white/5 p-6 flex flex-col gap-8 pt-24 z-50 transition-transform duration-300 ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}`}>
+        <div className="hidden md:flex items-center gap-3 px-2">
           <div className="w-10 h-10 bg-primary rounded-xl flex items-center justify-center">
             <Settings className="text-secondary w-6 h-6" />
           </div>
           <span className="text-xl font-display font-black tracking-tighter text-white">ADMIN<span className="text-primary italic">HUB</span></span>
         </div>
 
-        <nav className="flex flex-col gap-2">
+        <nav className="flex flex-col gap-2 flex-1 overflow-y-auto">
           {[
             { id: 'overview', icon: LayoutDashboard, label: 'Overview' },
             { id: 'bookings', icon: Calendar, label: 'Bookings' },
@@ -372,7 +405,10 @@ export default function AdminDashboard() {
           ].map((item) => (
             <button
               key={item.id}
-              onClick={() => setActiveTab(item.id as Tab)}
+              onClick={() => {
+                setActiveTab(item.id as Tab);
+                setIsSidebarOpen(false);
+              }}
               className={`flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-bold transition-all ${
                 activeTab === item.id 
                   ? 'bg-primary text-secondary' 
@@ -397,7 +433,7 @@ export default function AdminDashboard() {
       </aside>
 
       {/* Main Content */}
-      <main className="flex-1 p-6 md:p-10 pt-24 overflow-y-auto">
+      <main className="flex-1 p-4 md:p-6 lg:p-10 md:pt-24 overflow-x-hidden relative z-0">
         <div className="max-w-6xl mx-auto">
           <AnimatePresence mode="wait">
             {activeTab === 'overview' && (
@@ -555,24 +591,24 @@ export default function AdminDashboard() {
                         className="w-full bg-white/5 border border-white/10 rounded-2xl py-4 pl-12 pr-4 text-xs font-bold tracking-widest focus:border-primary outline-none transition-all"
                       />
                     </div>
-                    <input 
-                      type="date" 
+                    <input
+                      type="date"
                       value={dateFilter}
                       onChange={(e) => setDateFilter(e.target.value)}
-                      className="bg-white/5 border border-white/10 rounded-2xl py-4 px-6 text-xs font-bold tracking-widest focus:border-primary outline-none transition-all text-white"
+                      className="bg-white/5 border border-white/10 rounded-2xl py-4 px-6 text-xs font-bold tracking-widest focus:border-primary outline-none transition-all text-white [color-scheme:dark]"
                     />
-                    <select 
+                    <select
                       value={sportFilter}
                       onChange={(e) => setSportFilter(e.target.value)}
                       className="bg-white/5 border border-white/10 rounded-2xl py-4 px-6 text-xs font-bold tracking-widest focus:border-primary outline-none transition-all text-white"
                     >
-                      <option value="all">ALL SPORTS</option>
-                      <option value="football">FOOTBALL</option>
-                      <option value="cricket">CRICKET</option>
+                      <option className="text-black" value="all">ALL SPORTS</option>
+                      <option className="text-black" value="football">FOOTBALL</option>
+                      <option className="text-black" value="cricket">CRICKET</option>
                     </select>
                   </div>
                   <div className="flex gap-2 w-full lg:w-auto">
-                    <button 
+                    <button
                       onClick={exportToCSV}
                       className="flex-1 lg:flex-none px-8 py-4 bg-white/5 border border-white/10 text-white rounded-2xl text-[10px] font-black tracking-widest uppercase hover:bg-white/10 transition-all flex items-center gap-2"
                     >
@@ -589,33 +625,33 @@ export default function AdminDashboard() {
 
                 {/* Table */}
                 <div className="bg-white/5 border border-white/10 rounded-[2.5rem] overflow-hidden">
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-left text-sm">
-                      <thead className="bg-white/5 text-white/40 uppercase text-[10px] font-black tracking-[0.2em]">
+                  <div className="overflow-x-auto w-full">
+                    <table className="w-full text-left text-sm whitespace-nowrap">
+                      <thead className="bg-white/5 text-white/40 uppercase text-[10px] font-black tracking-[0.2em] sticky top-0">
                         <tr>
-                          <th className="px-8 py-6">BOOKING ID</th>
-                          <th className="px-8 py-6">USER</th>
-                          <th className="px-8 py-6">SPORT</th>
-                          <th className="px-8 py-6">DATE & TIME</th>
-                          <th className="px-8 py-6">AMOUNT</th>
-                          <th className="px-8 py-6">STATUS</th>
-                          <th className="px-8 py-6 text-right">ACTIONS</th>
+                          <th className="px-6 md:px-8 py-6">BOOKING ID</th>
+                          <th className="px-6 md:px-8 py-6">USER</th>
+                          <th className="px-6 md:px-8 py-6">SPORT</th>
+                          <th className="px-6 md:px-8 py-6">DATE & TIME</th>
+                          <th className="px-6 md:px-8 py-6">AMOUNT</th>
+                          <th className="px-6 md:px-8 py-6">STATUS</th>
+                          <th className="px-6 md:px-8 py-6 text-right">ACTIONS</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-white/5">
                         {filteredBookings.map((booking) => (
                           <tr key={booking.id} className="hover:bg-white/5 transition-colors group">
-                            <td className="px-8 py-6 font-mono text-white/80">{booking.id}</td>
-                            <td className="px-8 py-6">
+                            <td className="px-6 md:px-8 py-6 font-mono text-white/80">{booking.id}</td>
+                            <td className="px-6 md:px-8 py-6">
                               <div className="font-bold text-white">{booking.user_name}</div>
                               <div className="text-[10px] text-white/30 uppercase tracking-widest">ID: {booking.user_id}</div>
                             </td>
-                            <td className="px-8 py-6">
+                            <td className="px-6 md:px-8 py-6">
                               <span className="px-3 py-1 bg-white/5 rounded-full text-[10px] font-black uppercase tracking-widest text-white/60">
                                 {booking.sport}
                               </span>
                             </td>
-                            <td className="px-8 py-6">
+                            <td className="px-6 md:px-8 py-6">
                               <div className="font-bold text-white">{new Date(booking.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }).toUpperCase()}</div>
                               <div className="text-[10px] text-primary font-black uppercase tracking-widest">
                                 {JSON.parse(booking.slots).map((id: string) => {
@@ -624,15 +660,15 @@ export default function AdminDashboard() {
                                 }).join(', ')}
                               </div>
                             </td>
-                            <td className="px-8 py-6 font-display font-black text-white">₹{booking.total_price}</td>
-                            <td className="px-8 py-6">
+                            <td className="px-6 md:px-8 py-6 font-display font-black text-white">₹{booking.total_price}</td>
+                            <td className="px-6 md:px-8 py-6">
                               <span className={`px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest ${
                                 booking.status === 'confirmed' ? 'bg-primary/20 text-primary' : 'bg-red-500/20 text-red-500'
                               }`}>
                                 {booking.status}
                               </span>
                             </td>
-                            <td className="px-8 py-6 text-right">
+                            <td className="px-6 md:px-8 py-6 text-right">
                               {booking.status === 'confirmed' && (
                                 <button 
                                   onClick={() => handleCancelBooking(booking.id)}
@@ -897,52 +933,150 @@ export default function AdminDashboard() {
                 </div>
 
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                  {/* Block Slot UI */}
                   <div className="bg-white/5 border border-white/10 p-8 rounded-[2.5rem] space-y-6">
-                    <h3 className="text-xl font-display font-black text-white uppercase tracking-tight">BLOCK A SLOT</h3>
+                    <h3 className="text-xl font-display font-black text-white uppercase tracking-tight flex items-center gap-3">
+                      <Lock className="w-5 h-5 text-red-500" /> BLOCK A SLOT
+                    </h3>
                     <form onSubmit={async (e) => {
                       e.preventDefault();
-                      const form = e.target as HTMLFormElement;
-                      const date = (form.elements.namedItem('date') as HTMLInputElement).value;
-                      const slotId = (form.elements.namedItem('slot') as HTMLInputElement).value;
-                      const reason = (form.elements.namedItem('reason') as HTMLInputElement).value;
+                      if (!blockDate || !blockSlotId) return alert('Date and Slot required');
                       
                       await fetch('/api/admin/block-slot', {
                         method: 'POST',
                         headers: {'Content-Type':'application/json'},
-                        body: JSON.stringify({ sport: 'all', date, slotId, reason })
+                        body: JSON.stringify({ sport: 'all', date: blockDate, slotId: blockSlotId, reason: blockReason })
                       });
                       alert('Slot Blocked');
-                      form.reset();
+                      setBlockDate('');
+                      setBlockSlotId('');
+                      setBlockReason('');
                     }} className="space-y-4">
-                      <input type="date" name="date" className="w-full bg-white/5 border border-white/10 rounded-xl p-4 text-white font-bold" required />
-                      <input type="text" name="slot" placeholder="SLOT TIME (E.G. 06:00 - 07:00)" className="w-full bg-white/5 border border-white/10 rounded-xl p-4 text-white font-bold" required />
-                      <input type="text" name="reason" placeholder="REASON (E.G. MAINTENANCE)" className="w-full bg-white/5 border border-white/10 rounded-xl p-4 text-white font-bold" />
-                      <button className="w-full bg-red-500 text-white py-4 rounded-xl font-black uppercase tracking-widest hover:bg-red-600 transition-all">BLOCK SLOT</button>
+                      <input 
+                        type="date" 
+                        value={blockDate}
+                        onChange={(e) => setBlockDate(e.target.value)}
+                        className="w-full bg-black/40 border border-white/10 rounded-xl p-4 text-white font-bold outline-none focus:border-red-500 transition-all [color-scheme:dark]" 
+                        required 
+                      />
+                      <select
+                        value={blockSlotId}
+                        onChange={(e) => setBlockSlotId(e.target.value)}
+                        className="w-full bg-black/40 border border-white/10 rounded-xl p-4 text-white font-bold outline-none focus:border-red-500 transition-all"
+                        required
+                      >
+                        <option className="text-black" value="" disabled>SELECT TIME SLOT</option>
+                        {SLOTS.map(slot => (
+                          <option className="text-black" key={slot.id} value={slot.id}>{slot.time}</option>
+                        ))}
+                      </select>
+                      <input 
+                        type="text" 
+                        value={blockReason}
+                        onChange={(e) => setBlockReason(e.target.value)}
+                        placeholder="REASON (E.G. MAINTENANCE)" 
+                        className="w-full bg-black/40 border border-white/10 rounded-xl p-4 text-white font-bold outline-none focus:border-red-500 transition-all" 
+                      />
+                      <button type="submit" className="w-full bg-red-500/10 text-red-500 border border-red-500/20 py-4 rounded-xl font-black uppercase tracking-widest hover:bg-red-500 hover:text-white transition-all">BLOCK SLOT</button>
                     </form>
                   </div>
 
+                  {/* Cancel Bookings UI */}
                   <div className="bg-white/5 border border-white/10 p-8 rounded-[2.5rem] space-y-6">
-                    <h3 className="text-xl font-display font-black text-white uppercase tracking-tight">CANCEL ALL FOR SLOT</h3>
+                    <h3 className="text-xl font-display font-black text-white uppercase tracking-tight flex items-center gap-3">
+                      <Trash2 className="w-5 h-5 text-orange-500" /> CANCEL ALL FOR SLOT
+                    </h3>
                     <form onSubmit={async (e) => {
                       e.preventDefault();
-                      const form = e.target as HTMLFormElement;
-                      const date = (form.elements.namedItem('date') as HTMLInputElement).value;
-                      const slotId = (form.elements.namedItem('slot') as HTMLInputElement).value;
+                      if (!cancelDate || !cancelSlotId) return alert('Date and Slot required');
                       
-                      if (!confirm(`Cancel all bookings for ${slotId} on ${date}?`)) return;
+                      if (!confirm(`Cancel all bookings for ${cancelSlotId} on ${cancelDate}?`)) return;
 
                       await fetch('/api/admin/bookings/cancel-slot', {
                         method: 'POST',
                         headers: {'Content-Type':'application/json'},
-                        body: JSON.stringify({ date, slotId })
+                        body: JSON.stringify({ date: cancelDate, slotId: cancelSlotId })
                       });
                       alert('All bookings for this slot have been cancelled.');
-                      form.reset();
+                      setCancelDate('');
+                      setCancelSlotId('');
                       fetchBookings();
                     }} className="space-y-4">
-                      <input type="date" name="date" className="w-full bg-white/5 border border-white/10 rounded-xl p-4 text-white font-bold" required />
-                      <input type="text" name="slot" placeholder="SLOT TIME (E.G. 06:00 - 07:00)" className="w-full bg-white/5 border border-white/10 rounded-xl p-4 text-white font-bold" required />
-                      <button className="w-full bg-orange-500 text-white py-4 rounded-xl font-black uppercase tracking-widest hover:bg-orange-600 transition-all">CANCEL ALL BOOKINGS</button>
+                      <input 
+                        type="date" 
+                        value={cancelDate}
+                        onChange={(e) => setCancelDate(e.target.value)}
+                        className="w-full bg-black/40 border border-white/10 rounded-xl p-4 text-white font-bold outline-none focus:border-orange-500 transition-all [color-scheme:dark]" 
+                        required 
+                      />
+                      <select
+                        value={cancelSlotId}
+                        onChange={(e) => setCancelSlotId(e.target.value)}
+                        className="w-full bg-black/40 border border-white/10 rounded-xl p-4 text-white font-bold outline-none focus:border-orange-500 transition-all"
+                        required
+                      >
+                        <option className="text-black" value="" disabled>SELECT TIME SLOT</option>
+                        {SLOTS.map(slot => (
+                          <option className="text-black" key={slot.id} value={slot.id}>{slot.time}</option>
+                        ))}
+                      </select>
+                      <button type="submit" className="w-full bg-orange-500/10 text-orange-500 border border-orange-500/20 py-4 rounded-xl font-black uppercase tracking-widest hover:bg-orange-500 hover:text-white transition-all">CANCEL ALL BOOKINGS</button>
+                    </form>
+                  </div>
+
+                  {/* Dynamic Pricing UI */}
+                  <div className="bg-white/5 border border-white/10 p-8 rounded-[2.5rem] space-y-6 lg:col-span-2">
+                    <h3 className="text-xl font-display font-black text-white uppercase tracking-tight flex items-center gap-3">
+                      <DollarSign className="w-5 h-5 text-primary" /> DYNAMIC HOURLY PRICING
+                    </h3>
+                    <p className="text-white/40 text-xs font-bold tracking-widest uppercase mb-4">Set custom prices for specific hours. Overrides the default base price.</p>
+                    
+                    <form onSubmit={async (e) => {
+                      e.preventDefault();
+                      if (!selectedSlotForPrice || !customPrice) return alert('Slot and Price required');
+                      
+                      await fetch('/api/admin/slots/update', {
+                        method: 'POST',
+                        headers: {'Content-Type':'application/json'},
+                        body: JSON.stringify({ id: selectedSlotForPrice, time: selectedSlotForPrice, price: parseInt(customPrice) })
+                      });
+                      alert('Price Updated');
+                      fetchCustomSlots();
+                      setSelectedSlotForPrice('');
+                      setCustomPrice('');
+                    }} className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                      <select
+                        value={selectedSlotForPrice}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setSelectedSlotForPrice(val);
+                          const existing = customSlots.find(c => c.time === val);
+                          if (existing) {
+                            setCustomPrice(existing.price.toString());
+                          } else {
+                            setCustomPrice('');
+                          }
+                        }}
+                        className="w-full bg-black/40 border border-white/10 rounded-xl p-4 text-white font-bold outline-none focus:border-primary transition-all"
+                        required
+                      >
+                        <option className="text-black" value="" disabled>SELECT TIME SLOT</option>
+                        {SLOTS.map(slot => (
+                          <option className="text-black" key={'price-'+slot.id} value={slot.id}>{slot.time}</option>
+                        ))}
+                      </select>
+                      <div className="relative">
+                        <DollarSign className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-white/50" />
+                        <input 
+                          type="number" 
+                          value={customPrice}
+                          onChange={(e) => setCustomPrice(e.target.value)}
+                          placeholder="CUSTOM PRICE (₹)" 
+                          className="w-full bg-black/40 border border-white/10 rounded-xl p-4 pl-12 text-white font-bold outline-none focus:border-primary transition-all" 
+                          required 
+                        />
+                      </div>
+                      <button type="submit" className="w-full bg-primary text-secondary py-4 rounded-xl font-black uppercase tracking-widest hover:scale-[1.02] transition-transform shadow-[0_0_20px_rgba(0,255,136,0.2)]">SET PRICE</button>
                     </form>
                   </div>
                 </div>
