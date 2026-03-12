@@ -78,8 +78,11 @@ async function sendWhatsAppMessage(to: string, body: string) {
 
 // Initialize Database
 async function initDb() {
-  const client = await pool.connect();
+  let client;
   try {
+    console.log("Connecting to database...");
+    client = await pool.connect();
+    console.log("Connected. Running migrations...");
     await client.query(`
       CREATE TABLE IF NOT EXISTS users (
         id SERIAL PRIMARY KEY,
@@ -168,15 +171,26 @@ async function initDb() {
   } catch (err) {
     console.error("Database initialization failed", err);
   } finally {
-    client.release();
+    if (client) client.release();
   }
 }
 
 async function startServer() {
-  await initDb();
-  
   const app = express();
   const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
+
+  // Start listening immediately to avoid Render timeout
+  app.listen(PORT, "0.0.0.0", () => {
+    console.log(`Server is live and listening on port ${PORT}`);
+  });
+
+  console.log("Initializing database connection...");
+  try {
+    await initDb();
+    console.log("Database is ready.");
+  } catch (err) {
+    console.error("Database initialization failed at startup:", err);
+  }
 
   app.use(express.json());
 
@@ -963,9 +977,7 @@ Time: ${formattedSlots}`;
     });
   }
 
-  app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server running on http://localhost:${PORT}`);
-  });
+
 }
 
 startServer();
